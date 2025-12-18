@@ -1,5 +1,4 @@
 <template>
-  <!-- Тот же самый template, без изменений -->
   <div class="color-palette">
     <div class="palette-header">
       <h2>Генератор цветовых палитр</h2>
@@ -65,11 +64,39 @@
       Скопировано: {{ copiedColor }}
     </div>
 
-    <div class="save-status">
-      <button @click="toggleSavePalette" class="save-btn">
-        {{ isSaved ? '💾 Сохранено' : '💾 Сохранить палитру' }}
-      </button>
-      <span v-if="isSaved" class="save-message">(сохранено в браузере)</span>
+    <!-- ОДНА кнопка сохранения -->
+    <div class="save-section">
+      <div v-if="!isSaving" class="save-controls">
+        <button @click="startSaving" class="save-btn">
+          💾 Сохранить палитру
+        </button>
+        <span class="save-info">
+          В библиотеке: {{ savedPalettesCount }} палитр
+        </span>
+      </div>
+      
+      <div v-else class="save-form">
+        <label>
+          Название палитры:
+          <input 
+            v-model="paletteName" 
+            type="text" 
+            placeholder="Моя красивая палитра"
+            class="name-input"
+            ref="nameInput"
+            @keyup.enter="savePalette"
+          />
+        </label>
+        
+        <div class="form-buttons">
+          <button @click="savePalette" class="confirm-btn">Сохранить</button>
+          <button @click="cancelSaving" class="cancel-btn">Отмена</button>
+        </div>
+      </div>
+      
+      <div v-if="saveMessage" class="save-message" :class="saveMessageType">
+        {{ saveMessage }}
+      </div>
     </div>
 
     <div class="quick-actions">
@@ -81,10 +108,12 @@
 </template>
 
 <script setup>
-/* Тот же самый JavaScript код */
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, nextTick, defineEmits } from 'vue'
 import { colorUtils } from '../utils/colorUtils'
 
+const emit = defineEmits(['colors-updated', 'palette-saved'])
+
+// Основные реактивные данные
 const colors = ref([])
 const colorCount = ref(5)
 const colorFormat = ref('hex')
@@ -92,8 +121,133 @@ const paletteType = ref('analogous')
 const lockedIndices = ref([])
 const showNotification = ref(false)
 const copiedColor = ref('')
-const isSaved = ref(false)
 
+// Для сохранения
+const isSaving = ref(false)
+const paletteName = ref('')
+const saveMessage = ref('')
+const saveMessageType = ref('')
+const savedPalettesCount = ref(0)
+const nameInput = ref(null)
+
+// Загрузка количества сохраненных палитр
+const loadSavedPalettesCount = () => {
+  try {
+    const data = localStorage.getItem('paletteLibrary')
+    const palettes = data ? JSON.parse(data) : []
+    savedPalettesCount.value = palettes.length
+  } catch (error) {
+    console.error('Ошибка загрузки библиотеки:', error)
+    savedPalettesCount.value = 0
+  }
+}
+
+// Начать сохранение
+const startSaving = () => {
+  if (colors.value.length === 0) {
+    showSaveMessage('Сначала создайте палитру!', 'error')
+    return
+  }
+  
+  isSaving.value = true
+  paletteName.value = `Палитра ${new Date().toLocaleDateString('ru-RU')} ${new Date().toLocaleTimeString('ru-RU').slice(0,5)}`
+  
+  // Фокус на поле ввода
+  nextTick(() => {
+    if (nameInput.value) {
+      nameInput.value.focus()
+      nameInput.value.select()
+    }
+  })
+}
+
+// Сохранить палитру (и в текущие настройки, и в библиотеку)
+const savePalette = () => {
+  if (!paletteName.value.trim()) {
+    showSaveMessage('Введите название палитры', 'error')
+    return
+  }
+  
+  if (colors.value.length === 0) {
+    showSaveMessage('Нет цветов для сохранения', 'error')
+    return
+  }
+  
+  try {
+    // 1. Сохраняем текущие настройки палитры
+    const currentPaletteData = {
+      colors: colors.value,
+      lockedIndices: lockedIndices.value,
+      colorCount: colorCount.value,
+      paletteType: paletteType.value,
+      timestamp: new Date().toISOString()
+    }
+    localStorage.setItem('savedPalette', JSON.stringify(currentPaletteData))
+    
+    // 2. Сохраняем в библиотеку
+    const libraryData = localStorage.getItem('paletteLibrary')
+    const palettes = libraryData ? JSON.parse(libraryData) : []
+    
+    const newPalette = {
+      id: Date.now(),
+      name: paletteName.value.trim(),
+      colors: [...colors.value],
+      createdAt: new Date().toISOString(),
+      type: paletteType.value,
+      colorCount: colorCount.value,
+      isCurrent: true
+    }
+    
+    palettes.push(newPalette)
+    localStorage.setItem('paletteLibrary', JSON.stringify(palettes))
+    
+    // 3. Сохраняем как текущую палитру для быстрого доступа
+    localStorage.setItem('currentPalette', JSON.stringify(colors.value))
+    
+    // Обновляем счетчик
+    savedPalettesCount.value = palettes.length
+    
+    // Показываем сообщение
+    showSaveMessage(`Палитра "${paletteName.value}" сохранена!`, 'success')
+    
+    // Отправляем событие родителю
+    emit('palette-saved')
+    
+    // Сбрасываем форму
+    cancelSaving()
+    
+  } catch (error) {
+    console.error('Ошибка сохранения:', error)
+    showSaveMessage('Ошибка сохранения', 'error')
+  }
+}
+
+// Отменить сохранение
+const cancelSaving = () => {
+  isSaving.value = false
+  paletteName.value = ''
+}
+
+// Показать сообщение
+const showSaveMessage = (text, type) => {
+  saveMessage.value = text
+  saveMessageType.value = type
+  
+  setTimeout(() => {
+    saveMessage.value = ''
+    saveMessageType.value = ''
+  }, 3000)
+}
+
+// Метод для установки цветов извне
+const setColors = (newColors) => {
+  if (newColors && Array.isArray(newColors) && newColors.length > 0) {
+    colors.value = [...newColors]
+    emit('colors-updated', colors.value)
+  }
+}
+
+// Генерация случайной палитры
 const generateRandomPalette = () => {
   const newColors = colorUtils.generateHarmoniousPalette(null, parseInt(colorCount.value), paletteType.value)
   
@@ -106,7 +260,10 @@ const generateRandomPalette = () => {
   }
   
   colors.value = colors.value.slice(0, newColors.length)
-  isSaved.value = false
+  
+  // Сохраняем текущую палитру и отправляем событие
+  localStorage.setItem('currentPalette', JSON.stringify(colors.value))
+  emit('colors-updated', colors.value)
 }
 
 const regeneratePalette = () => {
@@ -120,6 +277,10 @@ const regenerateUnlocked = () => {
   colors.value = colors.value.map((color, index) => 
     lockedIndices.value.includes(index) ? color : newColors[index] || color
   )
+  
+  // Сохраняем текущую палитру и отправляем событие
+  localStorage.setItem('currentPalette', JSON.stringify(colors.value))
+  emit('colors-updated', colors.value)
 }
 
 const copyToClipboard = async (color) => {
@@ -158,44 +319,53 @@ const unlockAllColors = () => {
   lockedIndices.value = []
 }
 
-const toggleSavePalette = () => {
-  if (isSaved.value) {
-    localStorage.removeItem('savedPalette')
-    isSaved.value = false
-  } else {
-    const paletteData = {
-      colors: colors.value,
-      lockedIndices: lockedIndices.value,
-      colorCount: colorCount.value,
-      paletteType: paletteType.value,
-      timestamp: new Date().toISOString()
-    }
-    localStorage.setItem('savedPalette', JSON.stringify(paletteData))
-    isSaved.value = true
-  }
-}
-
+// Загрузка сохраненной палитры при старте
 const loadSavedPalette = () => {
-  const saved = localStorage.getItem('savedPalette')
-  if (saved) {
-    try {
+  try {
+    // Пробуем загрузить из текущих настроек
+    const saved = localStorage.getItem('savedPalette')
+    if (saved) {
       const paletteData = JSON.parse(saved)
       colors.value = paletteData.colors || []
       lockedIndices.value = paletteData.lockedIndices || []
       colorCount.value = paletteData.colorCount || 5
       paletteType.value = paletteData.paletteType || 'analogous'
-      isSaved.value = true
-    } catch (e) {
-      console.error('Ошибка загрузки:', e)
+      
+      // Сохраняем текущую палитру и отправляем событие
+      localStorage.setItem('currentPalette', JSON.stringify(colors.value))
+      emit('colors-updated', colors.value)
+      return
     }
+    
+    // Если нет сохраненных настроек, пробуем загрузить последнюю палитру
+    const currentPalette = localStorage.getItem('currentPalette')
+    if (currentPalette) {
+      colors.value = JSON.parse(currentPalette)
+      emit('colors-updated', colors.value)
+    }
+    
+  } catch (e) {
+    console.error('Ошибка загрузки:', e)
   }
 }
 
 onMounted(() => {
+  // Загружаем сохраненную палитру
   loadSavedPalette()
+  
+  // Загружаем счетчик библиотеки
+  loadSavedPalettesCount()
+  
+  // Если нет сохраненной палитры, генерируем новую
   if (colors.value.length === 0) {
     generateRandomPalette()
   }
+})
+
+// Экспортируем методы для использования извне
+defineExpose({
+  setColors,
+  colors
 })
 </script>
 
@@ -336,6 +506,105 @@ onMounted(() => {
   border-radius: 50%;
 }
 
+/* Блок сохранения */
+.save-section {
+  margin: 25px 0;
+  padding: 20px;
+  background-color: #f9f9f9;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+}
+
+.save-controls {
+  display: flex;
+  align-items: center;
+  gap: 15px;
+  flex-wrap: wrap;
+}
+
+.save-btn {
+  padding: 12px 24px;
+  background-color: #2196F3;
+  color: white;
+  border: none;
+  border-radius: 5px;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+.save-btn:hover {
+  background-color: #0b7dda;
+}
+
+.save-info {
+  font-size: 14px;
+  color: #666;
+}
+
+.save-form {
+  display: flex;
+  flex-direction: column;
+  gap: 15px;
+}
+
+.save-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-weight: bold;
+  color: #333;
+}
+
+.name-input {
+  padding: 10px;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  font-size: 16px;
+}
+
+.form-buttons {
+  display: flex;
+  gap: 10px;
+}
+
+.confirm-btn {
+  flex: 1;
+  padding: 10px;
+  background-color: #4CAF50;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.cancel-btn {
+  flex: 1;
+  padding: 10px;
+  background-color: #f0f0f0;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.save-message {
+  margin-top: 10px;
+  padding: 8px 12px;
+  border-radius: 4px;
+  font-size: 14px;
+}
+
+.save-message.success {
+  background-color: #d4edda;
+  color: #155724;
+  border: 1px solid #c3e6cb;
+}
+
+.save-message.error {
+  background-color: #f8d7da;
+  color: #721c24;
+  border: 1px solid #f5c6cb;
+}
+
 .notification {
   position: fixed;
   top: 20px;
@@ -350,30 +619,6 @@ onMounted(() => {
 @keyframes fadeInOut {
   0%, 100% { opacity: 0; }
   10%, 90% { opacity: 1; }
-}
-
-.save-status {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-  margin-bottom: 20px;
-  padding: 15px;
-  background-color: #e8f4fd;
-  border-radius: 6px;
-}
-
-.save-btn {
-  padding: 10px 20px;
-  background-color: #2196F3;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-}
-
-.save-message {
-  color: #666;
-  font-size: 14px;
 }
 
 .quick-actions {
@@ -399,8 +644,18 @@ onMounted(() => {
     grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   }
   
-  .quick-actions {
+  .quick-actions,
+  .form-buttons {
     flex-direction: column;
+  }
+  
+  .save-controls {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+  
+  .save-btn {
+    width: 100%;
   }
 }
 </style>

@@ -3,6 +3,12 @@
     <!-- Основной генератор -->
     <ColorPalette ref="paletteGenerator" />
     
+    <!-- Сохранение текущей палитры -->
+    <SavePalette :colors="currentColors" />
+    
+    <!-- Библиотека -->
+    <PaletteLibrary @load="loadPaletteFromLibrary" />
+    
     <!-- Дополнительные инструменты -->
     <div class="advanced-tools">
       <h3>Дополнительные возможности</h3>
@@ -49,14 +55,26 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import ColorPalette from '../components/ColorPalette.vue'
+import SavePalette from '../components/SavePalette.vue'
+import PaletteLibrary from '../components/PaletteLibrary.vue'
 import PalettePreview from '../components/PalettePreview.vue'
 import AccessibilityChecker from '../components/AccessibilityChecker.vue'
 import { colorUtils } from '../utils/colorUtils'
+import { storage } from '../utils/storage'
 
 const paletteGenerator = ref(null)
 const currentColors = ref([])
 const exportCode = ref('')
 
+// Загрузить палитру из библиотеки
+const loadPaletteFromLibrary = (colors) => {
+  if (paletteGenerator.value) {
+    paletteGenerator.value.colors = [...colors]
+    updateCurrentColors()
+  }
+}
+
+// Обновить текущие цвета
 const updateCurrentColors = () => {
   if (paletteGenerator.value) {
     currentColors.value = paletteGenerator.value.colors || []
@@ -100,7 +118,14 @@ ${tailwindColors}
 }
 
 onMounted(() => {
-  setInterval(updateCurrentColors, 1000)
+  // Авто-обновление текущих цветов
+  setInterval(updateCurrentColors, 500)
+  
+  // Попробовать загрузить последнюю палитру
+  const savedPalette = storage.getCurrentPalette()
+  if (savedPalette && paletteGenerator.value) {
+    paletteGenerator.value.colors = savedPalette
+  }
 })
 </script>
 
